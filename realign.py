@@ -72,23 +72,31 @@ def sym_rigid():
     coor = v2d(shape, img.affine)
     M = np.linalg.inv(coor) @ M_r @ coor
     return M
-# 残差函数  非常慢，需要优化(甚至没有跑完一遍因为太慢了)
-def b(resource, reference):
-    # 插值
+
+
+def LS(resource, reference):
+    # 残差函数--最小二乘法  非常慢，需要优化
+    # B样条插值/B-spline interpolation
+    # 因为找不到三维bspline及其导数的简单库，先用regular grid interpolator代替bspline,用切线斜率代替导数
     interp = RegularGridInterpolator((x, y, z), resource, method="quintic")
     # 对应位置的转换
-    bi = np.zeros((shape[0], shape[1], shape[2]))
-    for i in range(shape[0]):
-        for j in range(shape[1]):
-            for k in range(shape[2]):
-                Mi = M@[i, j, k, 1]
-                if 0<=Mi[0]<shape[0] and 0<=Mi[1]<shape[1] and 0<=Mi[2]<shape[2]:
-                    bi[i][j][k] = interp(Mi[:3])-reference[i][j][k]
+    step = 10  # 因为跑的慢所以不要每个点都跑，先选一些试试
+    bi = np.zeros(((shape[0]//step)*(shape[1]//step)*(shape[2]//step)))
+    index = 0
+    for i in range(0, shape[0]//step):
+        for j in range(0, shape[1]//step):
+            for k in range(0, shape[2]//step):
+                n_i = i*step  # 在原图的位置
+                n_j = j*step
+                n_k = k*step
+                Mi = M@[n_i, n_j, n_k, 1]
+                if 0 <= Mi[0] < shape[0] and 0 <= Mi[1] < shape[1] and 0 <= Mi[2] < shape[2]:
+                    bi[index] = interp(Mi[:3])-reference[n_i][n_j][n_k]
                 else:
-                    bi[i][j][k] = resource[i][j][k]-reference[i][j][k]
-                print(i,j,k)
-
-    return print(bi)
+                    bi[index] = resource[n_i][n_j][n_k] - \
+                        reference[n_i][n_j][n_k]  # 超出范围就不转了
+                index += 1
+    return bi
 
 
 # -----------------------------------------------
@@ -98,26 +106,20 @@ img = nib.load(path)
 img_data = img.get_fdata()
 shape = img_data.shape
 # ------------------------------------------------
-# 初始化刚体变换向量(为方便理解，q[0]为灰度平衡参数q7，目前版本中暂不使用,默认为1)
+# 初始化刚体变换向量及变换矩阵(为方便理解，q[0]为灰度平衡参数q7，目前版本中暂不使用,默认为1)
 # Rigid body transformation vector
 # (for easy understanding, q [0] is the gray balance parameter q7，not used in this version)
 q = np.zeros(7, np.float64)
+M = rigid(q)
 
-
-# B样条插值/B-spline interpolation
-# 因为找不到三维bspline及其导数的简单库，先用regular grid interpolator代替bspline,用切线斜率代替导数
+# 创建网格为插值铺垫
 x = np.arange(shape[0])
 y = np.arange(shape[1])
 z = np.arange(shape[2])
-# 取一个测试，inter是插值点的灰度值
-# interp = RegularGridInterpolator(
-#     (x, y, z), img_data[:, :, :, 1], method="quintic")
-# test = [10.5, 10.5, 10.5]
-# inter = interp(test)
-# print(inter)
+
 
 # 对于q的符号偏导
-M = rigid(q)
+
 q_1 = sympy.Symbol('q_1')
 q_2 = sympy.Symbol('q_2')
 q_3 = sympy.Symbol('q_3')
@@ -137,7 +139,9 @@ diff_6 = sympy.diff(np.sum(
     sym_M[0]), q_6)+sympy.diff(np.sum(sym_M[1]), q_6)+sympy.diff(np.sum(sym_M[2]), q_6)
 diff_0 = 1  # 占个位置先
 diff = np.array([diff_1, diff_2, diff_3, diff_4, diff_5, diff_6, diff_0])
-# print(diff)
+
 
 # 高斯牛顿迭代
-b(img_data[:, :, :, 1], img_data[:, :, :, 2])
+# 算残差函数
+b = LS(img_data[:, :, :, 1], img_data[:, :, :, 2])
+print(b)
