@@ -80,8 +80,10 @@ def LS(resource, reference):
     # 因为找不到三维bspline及其导数的简单库，先用regular grid interpolator代替bspline,用切线斜率代替导数
     interp = RegularGridInterpolator((x, y, z), resource, method="quintic")
     # 对应位置的转换
-    step = 10  # 因为跑的慢所以不要每个点都跑，先选一些试试
+
     bi = np.zeros(((shape[0]//step)*(shape[1]//step)*(shape[2]//step)))
+    b_diff = np.zeros(
+        ((shape[0]//step)*(shape[1]//step)*(shape[2]//step), 7))  # 偏导矩阵
     index = 0
     for i in range(0, shape[0]//step):
         for j in range(0, shape[1]//step):
@@ -90,12 +92,32 @@ def LS(resource, reference):
                 n_j = j*step
                 n_k = k*step
                 Mi = M@[n_i, n_j, n_k, 1]
+                Mi_near = [i+1 for i in Mi]
                 if 0 <= Mi[0] < shape[0] and 0 <= Mi[1] < shape[1] and 0 <= Mi[2] < shape[2]:
                     bi[index] = interp(Mi[:3])-reference[n_i][n_j][n_k]
+                    # 切线近似偏导数，分母为1省略
+                    diff_x = float(
+                        interp(np.append(Mi_near[0], Mi[1:3]))-interp(Mi[:3]))
+                    diff_y = float(
+                        interp(np.append(np.append(Mi[0], Mi_near[1]), Mi[2]))-interp(Mi[:3]))
+                    diff_z = float(
+                        interp(np.append(Mi[0:2], Mi_near[2]))-interp(Mi[:3]))
+                    for iindex in range(6):
+                        print(diff[iindex+3][0])
+                        
+                        b_diff[index][iindex] = diff_x*(diff[iindex][0].subs('q_'+iindex, q[iindex])) + \
+                            diff_y*(diff[iindex][1].subs('q_'+iindex, q[iindex])) + \
+                            diff_z*(diff[iindex]
+                                    [2].subs('q_'+iindex, q[iindex]))
                 else:
                     bi[index] = resource[n_i][n_j][n_k] - \
                         reference[n_i][n_j][n_k]  # 超出范围就不转了
+                    for iindex in range(6):
+                        b_diff[index][iindex] = diff_x*diff[iindex][0] + \
+                            diff_y*diff[iindex][1]+diff_z*diff[iindex][2]
+                b_diff[index][6] = -reference[n_i][n_j][n_k]
                 index += 1
+    print(b_diff)
     return bi
 
 
@@ -119,29 +141,24 @@ z = np.arange(shape[2])
 
 
 # 对于q的符号偏导
-
-q_1 = sympy.Symbol('q_1')
-q_2 = sympy.Symbol('q_2')
-q_3 = sympy.Symbol('q_3')
-q_4 = sympy.Symbol('q_4')
-q_5 = sympy.Symbol('q_5')
-q_6 = sympy.Symbol('q_6')
-q_0 = sympy.Symbol('q_0')
+(q_0, q_1, q_2, q_3, q_4, q_5, q_6) = sympy.symbols('q_0:7')
 sym_M = sym_rigid()
-diff_1 = 1  # 数值就是这个，节约计算时间直接写为1
-diff_2 = 1
-diff_3 = 1
-diff_4 = sympy.diff(np.sum(
-    sym_M[0]), q_4)+sympy.diff(np.sum(sym_M[1]), q_4)+sympy.diff(np.sum(sym_M[2]), q_4)
-diff_5 = sympy.diff(np.sum(
-    sym_M[0]), q_5)+sympy.diff(np.sum(sym_M[1]), q_5)+sympy.diff(np.sum(sym_M[2]), q_5)
-diff_6 = sympy.diff(np.sum(
-    sym_M[0]), q_6)+sympy.diff(np.sum(sym_M[1]), q_6)+sympy.diff(np.sum(sym_M[2]), q_6)
-diff_0 = 1  # 占个位置先
-diff = np.array([diff_1, diff_2, diff_3, diff_4, diff_5, diff_6, diff_0])
-
+diff_1 = [1, 0, 0]  # 数值就是这个，节约计算时间
+diff_2 = [0, 1, 0]
+diff_3 = [0, 0, 1]
+diff_4 = [sympy.diff(np.sum(sym_M[0]), q_4), sympy.diff(
+    np.sum(sym_M[1]), q_4), sympy.diff(np.sum(sym_M[2]), q_4)]
+diff_5 = [sympy.diff(np.sum(sym_M[0]), q_5), sympy.diff(
+    np.sum(sym_M[1]), q_5), sympy.diff(np.sum(sym_M[2]), q_5)]
+diff_6 = [sympy.diff(np.sum(sym_M[0]), q_6), sympy.diff(
+    np.sum(sym_M[1]), q_6), sympy.diff(np.sum(sym_M[2]), q_6)]
+diff_0 = [1, 1, 1]  # 占个位置先
+diff = np.array([diff_1, diff_2, diff_3, diff_4,
+                diff_5, diff_6, diff_0])
 
 # 高斯牛顿迭代
 # 算残差函数
+# 取一张图试试先
+step = 10  # 因为跑的慢所以不要每个点都跑，先选一些试试
 b = LS(img_data[:, :, :, 1], img_data[:, :, :, 2])
-print(b)
+# print(b)
