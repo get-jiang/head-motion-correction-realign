@@ -14,3 +14,4 @@
 2. email询问原作者一些实现细节（待实现）
 3. 优化GUI界面（删除）
 4. 加入reslice（不重要）
+5. 加入pytorch-optimizer选项
