@@ -1,6 +1,5 @@
 import numpy as np
 from math import cos, sin
-from scipy.interpolate import *
 import itk
 
 
@@ -15,16 +14,17 @@ class Realign:
         spacing_array = np.array(spacing)
         diagonal_matrix = np.diag(spacing_array)
         self.affine = diagonal_matrix
-
-    def v2d(self, shape, affine):
+        
+    
+    def v2d(self):
         # 体素坐标到笛卡尔坐标的转换,并将坐标原点移到图像中心
         # voxel to descartes coordinate system
         # Move the coordinate origin to the image center
         descartes = np.zeros((4, 4))
-        descartes[:, 0:3] = affine[:, 0:3]
-        shape1 = np.asarray(shape)
+        descartes[:, :3] = self.affine[:, :3]
+        shape1 = np.asarray(self.shape)
         shape1[3] = 0
-        descartes[:, 3] = -0.5 * shape1 + affine[:, 3]
+        descartes[:, 3] = -0.5 * shape1 + self.affine[:, 3]
         return descartes
 
     def rigid(self, q):
@@ -50,7 +50,7 @@ class Realign:
                         [0, 0, 0, 1]])
         R = R_x @ R_y @ R_z
         M_r = T @ R
-        coor = Realign.v2d(self, self.shape, self.affine)
+        coor = Realign.v2d(self)
         M = np.linalg.inv(coor) @ M_r @ coor
         return M
 
@@ -82,12 +82,10 @@ class Realign:
                         point[1] = interpo_pos[1]
                         point[2] = interpo_pos[2]
                         point[3] = interpo_pos[3]
-                        bi[index] = interpolator.Evaluate(
-                            point)-reference[n_i][n_j][n_k]  # 残差函数
+                        bi[index] = interpolator.Evaluate(point)-reference[n_i][n_j][n_k]  # 残差函数
 
                     else:
-                        bi[index] = resource[n_i][n_j][n_k] - \
-                            reference[n_i][n_j][n_k]  # 超出范围就不转了
+                        bi[index] = resource[n_i][n_j][n_k] - reference[n_i][n_j][n_k]  # 超出范围就不转了
                         point = itk.Point[itk.D, 4]()
                         point[0] = n_i
                         point[1] = n_j
@@ -98,9 +96,7 @@ class Realign:
                     diff_x = derivative[0]
                     diff_y = derivative[1]
                     diff_z = derivative[2]
-                    b_diff[index][0] = diff_x
-                    b_diff[index][1] = diff_y
-                    b_diff[index][2] = diff_z
+                    b_diff[index][:3] = diff_x, diff_y, diff_z
                     b_diff[index][3] = diff_y*(-0.5*self.affine[0][0]*self.shape[0]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[1][1] + self.affine[0][0]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[1][1] - 0.5*self.shape[1]*(-sin(q[4])*cos(q[6]) - sin(q[5])*sin(q[6])*cos(q[4])) - sin(q[4])*cos(q[6]) - sin(q[5])*sin(q[6])*cos(q[4]) - 0.5*self.affine[2][2]*self.shape[2]*cos(q[4])*cos(q[5])/self.affine[1][1] + self.affine[2][2]*cos(q[4])*cos(q[5])/self.affine[1][1]) + \
                         diff_z*(-0.5*self.affine[0][0]*self.shape[0]*(sin(q[4])*sin(q[5])*cos(q[6]) + sin(q[6])*cos(q[4]))/self.affine[2][2] + self.affine[0][0]*(sin(q[4])*sin(q[5])*cos(q[6]) + sin(q[6])*cos(q[4]))/self.affine[2][2] - 0.5*self.affine[1][1]*self.shape[1]*(
                             sin(q[4])*sin(q[5])*sin(q[6]) - cos(q[4])*cos(q[6]))/self.affine[2][2] + self.affine[1][1]*(sin(q[4])*sin(q[5])*sin(q[6]) - cos(q[4])*cos(q[6]))/self.affine[2][2] + 0.5*self.shape[2]*sin(q[4])*cos(q[5]) - sin(q[4])*cos(q[5]))
@@ -120,18 +116,20 @@ class Realign:
         return bi, b_diff
 
     def perform(self):
-        q = np.zeros(7, np.float64)
-
+        #随机初始化参数
+        q = np.random.rand(7)
+        q[6]=1
+        iteration = 4#迭代次数(可调)
         # 高斯牛顿迭代
         # 算残差函数
-        b_total = []
+        whole_pic=[]
         for picture in range(2, self.shape[3]):
-            for i in range(4):
-                (b, diff_b) = Realign.LS(
-                    self, self.img_data[:, :, :, 1], self.img_data[:, :, :, picture], q)
+            for i in range(iteration):
+                (b, diff_b) = Realign.LS(self, self.img_data[:, :, :, 1], self.img_data[:, :, :, picture], q)
                 q -= np.linalg.inv(diff_b.T@diff_b)@diff_b.T@b
-                b_total.append(sum(b))
-            return str(b_total)
+            whole_pic.append(q)
+            print(f"第{picture}张图片的参数为：{q}")
+        return str(whole_pic)#不知道为什么这里要加上str
 
 #测验代码，用于测试上面的类，勿删
 # realign = Realign('sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii.gz')
