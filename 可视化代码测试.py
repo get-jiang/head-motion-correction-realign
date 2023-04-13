@@ -5,8 +5,7 @@ import matplotlib.pyplot as plt
 path = "C:\\Users\\陈穆方\\Desktop\\python程序设计\\项目文件\\data\\data\\sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii\\sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii"
 img = nib.load(path)
 img_data = img.get_fdata()
-shape = img_data.shape
-#print(shape)#(96, 30, 64, 200)
+shape = img_data.shape#(96, 30, 64, 200)
 slize0=img_data[42,:,:,0]
 slize1=img_data[:,15,:,0]
 slize2=img_data[:,:,32,0]
@@ -21,4 +20,3 @@ plt.subplot(133)
 plt.imshow(slize2,cmap="gray")
 plt.title('2')
 plt.show()
-# 和matlab如出一辙。
