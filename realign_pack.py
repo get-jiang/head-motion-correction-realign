@@ -126,11 +126,15 @@ class Realign:
         for picture in range(2, self.shape[3]):
             for i in range(iteration):
                 (b, diff_b) = Realign.LS(self, self.img_data[:, :, :, 1], self.img_data[:, :, :, picture], q)
-                q -= np.linalg.inv(diff_b.T@diff_b)@diff_b.T@b
+                
+                if np.linalg.det(diff_b.T@diff_b)==0:
+                    q-=np.linalg.pinv(diff_b.T@diff_b)@diff_b.T@b#这里用伪逆是因为有时候矩阵不可逆
+                else:
+                    q -= np.linalg.inv(diff_b.T@diff_b)@diff_b.T@b
             whole_pic.append(q)
             print(f"第{picture}张图片的参数为：{q}")
         return str(whole_pic)#不知道为什么这里要加上str
 
 #测验代码，用于测试上面的类，勿删
-# realign = Realign('sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii.gz')
-# print(realign.perform())
+realign = Realign('sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii.gz')
+print(realign.perform())
