@@ -33,7 +33,7 @@ class UI(QMainWindow):
     def clicker_2(self):
         realign = Realign(self.path)
         
-        self.label.setText(realign.perform())
+        self.label.setText(str(realign.estimate()))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
