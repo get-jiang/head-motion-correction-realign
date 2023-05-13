@@ -117,7 +117,10 @@ class Realign:
             for j in range(0, self.shape[2]):
                 for k in range(0, self.shape[3]):
                     M = self.rigid(q)
-                    interpo_pos = M@[i, j, k, 1]
+                    if np.linalg.det(M)==0:
+                        interpo_pos = np.linalg.pinv(M)@[i, j, k, 1]
+                    else:
+                        interpo_pos = np.linalg.inv(M)@[i, j, k, 1]
                     if 0 <= interpo_pos[0] < self.shape[1] and 0 <= interpo_pos[1] < self.shape[2] and 0 <= interpo_pos[2] < self.shape[3]:  # 判断是否在范围内
                         point = itk.Point[itk.D, 4]()
                         point[0] = interpo_pos[0]
@@ -155,7 +158,10 @@ class Realign:
                     n_j = j*step
                     n_k = k*step
                     M = self.rigid(q)
-                    interpo_pos = M@[n_i, n_j, n_k, 1]
+                    if np.linalg.det(M)==0:
+                        interpo_pos = np.linalg.pinv(M)@[n_i, n_j, n_k, 1]
+                    else:
+                        interpo_pos = np.linalg.inv(M)@[n_i, n_j, n_k, 1]
                     point = itk.Point[itk.D, 4]()
                     if 0 <= interpo_pos[0] < self.shape[1] and 0 <= interpo_pos[1] < self.shape[2] and 0 <= interpo_pos[2] < self.shape[3]:  # 判断是否在范围内
                         point[0] = interpo_pos[0]
@@ -275,7 +281,7 @@ class Realign:
 realign = Realign('sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii.gz')
 # 展示参数设置方法
 realign.set_order(3)
-realign.set_iteration(3)
+realign.set_iteration(1)
 # 获得刚体变换参数
 realign.estimate()
 # 获得重采样后的图像
