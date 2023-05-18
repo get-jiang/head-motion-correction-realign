@@ -3,7 +3,7 @@ from math import cos, sin
 import itk
 import nibabel as nib
 import matplotlib.pyplot as plt
-
+from scipy.ndimage import gaussian_filter
 class Realign:
     def __init__(self, path):
         '''初始化(initialization)\n
@@ -25,12 +25,20 @@ class Realign:
         self.interpolator = itk.BSplineInterpolateImageFunction.New(
             self.img)  # B样条插值器(B-spline interpolation)
         self.interpolator.SetSplineOrder(3)# 设置B样条插值阶数(set B-spline interpolation order)
-        self.step = 5  # 选点间隔(point interval)
+        self.step = 4  # 选点间隔(point interval)
         self.x, self.y, self.z =  self.shape[1]//self.step, self.shape[2]//self.step,self.shape[3]//self.step
         # 初始旋转平移参数(rotation and translation parameters)
         self.parameter = np.zeros((self.shape[0], 7))
         print("图片载入成功,请耐心等待:) \nimage loaded successfully,please wait patiently")
-
+    
+    def set_gussian(self, sigma):
+        '''
+        设置高斯平滑参数(set gaussian parameter)\n
+        输入参数(parameter):\n
+        sigma:高斯核的标准差(sigma of gaussian kernel)
+        '''
+        self.img_data = gaussian_filter(self.img_data, sigma)
+        
     def set_iteration(self, iteration):
         '''
         设置迭代次数(set iteration times)\n
@@ -168,11 +176,14 @@ class Realign:
                         point[1] = interpo_pos[1]
                         point[2] = interpo_pos[2]
                         point[3] = interpo_pos[3]
-                        bi[index] = interpolator.Evaluate(point)-reference[n_i][n_j][n_k]  
+                        bi[index] = (interpolator.Evaluate(point)-reference[n_i][n_j][n_k])**2
+                        tem=interpolator.Evaluate(point)-reference[n_i][n_j][n_k]
 
                     else:
-                        bi[index] = resource[n_i][n_j][n_k] - \
-                            reference[n_i][n_j][n_k]  # 超出范围就不转了
+                        bi[index] = (resource[n_i][n_j][n_k] - \
+                            reference[n_i][n_j][n_k])**2  # 超出范围就不转了
+                        tem=resource[n_i][n_j][n_k] - \
+                            reference[n_i][n_j][n_k]
                         point[0] = n_i
                         point[1] = n_j
                         point[2] = n_k
@@ -182,22 +193,22 @@ class Realign:
                     diff_x = derivative[0]
                     diff_y = derivative[1]
                     diff_z = derivative[2]
-                    b_diff[index][:3] = diff_x, diff_y, diff_z
-                    b_diff[index][3] = diff_y*(-0.5*self.affine[0][0]*self.shape[0]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[1][1] + self.affine[0][0]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[1][1] - 0.5*self.shape[1]*(-sin(q[4])*cos(q[6]) - sin(q[5])*sin(q[6])*cos(q[4])) - sin(q[4])*cos(q[6]) - sin(q[5])*sin(q[6])*cos(q[4]) - 0.5*self.affine[2][2]*self.shape[2]*cos(q[4])*cos(q[5])/self.affine[1][1] + self.affine[2][2]*cos(q[4])*cos(q[5])/self.affine[1][1]) + \
+                    b_diff[index][:3] = diff_x*tem, diff_y*tem, diff_z*tem
+                    b_diff[index][3] = (diff_y*(-0.5*self.affine[0][0]*self.shape[0]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[1][1] + self.affine[0][0]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[1][1] - 0.5*self.shape[1]*(-sin(q[4])*cos(q[6]) - sin(q[5])*sin(q[6])*cos(q[4])) - sin(q[4])*cos(q[6]) - sin(q[5])*sin(q[6])*cos(q[4]) - 0.5*self.affine[2][2]*self.shape[2]*cos(q[4])*cos(q[5])/self.affine[1][1] + self.affine[2][2]*cos(q[4])*cos(q[5])/self.affine[1][1]) + \
                         diff_z*(-0.5*self.affine[0][0]*self.shape[0]*(sin(q[4])*sin(q[5])*cos(q[6]) + sin(q[6])*cos(q[4]))/self.affine[2][2] + self.affine[0][0]*(sin(q[4])*sin(q[5])*cos(q[6]) + sin(q[6])*cos(q[4]))/self.affine[2][2] - 0.5*self.affine[1][1]*self.shape[1]*(
-                            sin(q[4])*sin(q[5])*sin(q[6]) - cos(q[4])*cos(q[6]))/self.affine[2][2] + self.affine[1][1]*(sin(q[4])*sin(q[5])*sin(q[6]) - cos(q[4])*cos(q[6]))/self.affine[2][2] + 0.5*self.shape[2]*sin(q[4])*cos(q[5]) - sin(q[4])*cos(q[5]))
+                            sin(q[4])*sin(q[5])*sin(q[6]) - cos(q[4])*cos(q[6]))/self.affine[2][2] + self.affine[1][1]*(sin(q[4])*sin(q[5])*sin(q[6]) - cos(q[4])*cos(q[6]))/self.affine[2][2] + 0.5*self.shape[2]*sin(q[4])*cos(q[5]) - sin(q[4])*cos(q[5])))*tem
 
-                    b_diff[index][4] = diff_x*(0.5*self.shape[0]*sin(q[5])*cos(q[6]) - sin(q[5])*cos(q[6]) + 0.5*self.affine[1][1]*self.shape[1]*sin(q[5])*sin(q[6])/self.affine[0][0] - self.affine[1][1]*sin(q[5])*sin(q[6])/self.affine[0][0] - 0.5*self.affine[2][2]*self.shape[2]*cos(q[5])/self.affine[0][0] + self.affine[2][2]*cos(q[5])/self.affine[0][0]) +\
+                    b_diff[index][4] = (diff_x*(0.5*self.shape[0]*sin(q[5])*cos(q[6]) - sin(q[5])*cos(q[6]) + 0.5*self.affine[1][1]*self.shape[1]*sin(q[5])*sin(q[6])/self.affine[0][0] - self.affine[1][1]*sin(q[5])*sin(q[6])/self.affine[0][0] - 0.5*self.affine[2][2]*self.shape[2]*cos(q[5])/self.affine[0][0] + self.affine[2][2]*cos(q[5])/self.affine[0][0]) +\
                         diff_y*(0.5*self.affine[0][0]*self.shape[0]*sin(q[4])*cos(q[5])*cos(q[6])/self.affine[1][1] - self.affine[0][0]*sin(q[4])*cos(q[5])*cos(q[6])/self.affine[1][1] + 0.5*self.shape[1]*sin(q[4])*sin(q[6])*cos(q[5]) - sin(q[4])*sin(q[6])*cos(q[5]) + 0.5*self.affine[2][2]*self.shape[2]*sin(q[4])*sin(q[5])/self.affine[1][1] - self.affine[2][2]*sin(q[4])*sin(q[5])/self.affine[1][1]) +\
                         diff_z*(0.5*self.affine[0][0]*self.shape[0]*cos(q[4])*cos(q[5])*cos(q[6])/self.affine[2][2] - self.affine[0][0]*cos(q[4])*cos(q[5])*cos(q[6])/self.affine[2][2] + 0.5*self.affine[1][1]*self.shape[1]*sin(
-                            q[6])*cos(q[4])*cos(q[5])/self.affine[2][2] - self.affine[1][1]*sin(q[6])*cos(q[4])*cos(q[5])/self.affine[2][2] + 0.5*self.shape[2]*sin(q[5])*cos(q[4]) - sin(q[5])*cos(q[4]))
+                            q[6])*cos(q[4])*cos(q[5])/self.affine[2][2] - self.affine[1][1]*sin(q[6])*cos(q[4])*cos(q[5])/self.affine[2][2] + 0.5*self.shape[2]*sin(q[5])*cos(q[4]) - sin(q[5])*cos(q[4])))*tem
 
-                    b_diff[index][5] = diff_x*(0.5*self.shape[0]*sin(q[6])*cos(q[5]) - sin(q[6])*cos(q[5]) - 0.5*self.affine[1][1]*self.shape[1]*cos(q[5])*cos(q[6])/self.affine[0][0] + self.affine[1][1]*cos(q[5])*cos(q[6])/self.affine[0][0]) +\
+                    b_diff[index][5] = (diff_x*(0.5*self.shape[0]*sin(q[6])*cos(q[5]) - sin(q[6])*cos(q[5]) - 0.5*self.affine[1][1]*self.shape[1]*cos(q[5])*cos(q[6])/self.affine[0][0] + self.affine[1][1]*cos(q[5])*cos(q[6])/self.affine[0][0]) +\
                         diff_y*(-0.5*self.affine[0][0]*self.shape[0]*(sin(q[4])*sin(q[5])*sin(q[6]) - cos(q[4])*cos(q[6]))/self.affine[1][1] + self.affine[0][0]*(sin(q[4])*sin(q[5])*sin(q[6]) - cos(q[4])*cos(q[6]))/self.affine[1][1] - 0.5*self.shape[1]*(-sin(q[4])*sin(q[5])*cos(q[6]) - sin(q[6])*cos(q[4])) - sin(q[4])*sin(q[5])*cos(q[6]) - sin(q[6])*cos(q[4])) +\
                         diff_z*(-0.5*self.affine[0][0]*self.shape[0]*(sin(q[4])*cos(q[6]) + sin(q[5])*sin(q[6])*cos(q[4]))/self.affine[2][2] + self.affine[0][0]*(sin(q[4])*cos(q[6]) + sin(q[5])*sin(q[6])*cos(q[4]))/self.affine[2]
-                                [2] - 0.5*self.affine[1][1]*self.shape[1]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[2][2] + self.affine[1][1]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[2][2])
+                                [2] - 0.5*self.affine[1][1]*self.shape[1]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[2][2] + self.affine[1][1]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[2][2]))*tem
 
-                    b_diff[index][6] = -reference[n_i][n_j][n_k]
+                    b_diff[index][6] = -reference[n_i][n_j][n_k]*tem
                     index += 1
         return bi, b_diff
 
@@ -224,11 +235,12 @@ class Realign:
         print("开始估计刚体变换参数\nestimating")
         q=np.zeros(7)
         q[6] = 1
-        for picture in range(2, self.shape[0]):
-            
+        for picture in range(1, self.shape[0]):
+            q=np.zeros(7)
+            q[6] = 1
             # 高斯牛顿迭代
             for i in range(self.iteration):
-                (b, diff_b) = self.iterate(self.img_data[1,:, :, :], self.img_data[picture,:, :, :], q)
+                (b, diff_b) = self.iterate(self.img_data[0,:, :, :], self.img_data[picture,:, :, :], q)
                 q[6]=1
                 if np.linalg.det(diff_b.T@diff_b) == 0:
                     # 矩阵不可逆时用伪逆
@@ -240,6 +252,7 @@ class Realign:
                 q[6] = 1
             self.parameter[picture] = q
             print(f"进度{picture*100/self.shape[0]}%", end="\r")
+            print(np.array([q[0], q[1], q[2], q[3], q[4], q[5], q[6]]))
         self.draw_parameter()
         return self.parameter
 
@@ -281,7 +294,8 @@ class Realign:
 realign = Realign('sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii.gz')
 # 展示参数设置方法
 realign.set_order(3)
-realign.set_iteration(1)
+realign.set_iteration(3)
+realign.set_step(4)
 # 获得刚体变换参数
 realign.estimate()
 # 获得重采样后的图像
