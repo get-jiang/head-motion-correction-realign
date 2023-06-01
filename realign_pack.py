@@ -18,7 +18,8 @@ class Realign:
         self.shape = self.img_data.shape
         spacing = self.img.GetSpacing()  # 体素间距(voxel spacing)
         spacing_array = np.array(spacing)  
-        spacing_array = spacing_array[::-1]  # 倒序(reverse order)itk[读取的数据与nibabel读取的数据的坐标轴顺序不同]
+        self.oriaffine=np.diag(spacing_array)# 原始仿射矩阵(original affine matrix)
+        spacing_array = spacing_array[::-1]  # 倒序(reverse order)itk[读取的数据与nibabel读取的数据的坐标轴顺序不同,第一个数据是时间]
         self.affine = np.diag(spacing_array)  # 仿射矩阵(affine matrix)
         # 默认参数设置(default parameter setting)
         self.iteration = 100  # 迭代次数(iteration times)
@@ -30,7 +31,7 @@ class Realign:
         # 初始旋转平移参数(rotation and translation parameters)
         self.parameter = np.zeros((self.shape[0], 7))
         print("图片载入成功,请耐心等待:) \nimage loaded successfully,please wait patiently")
-    
+        print("图片大小为: \nimage size is:", self.shape)
     def set_gussian(self, sigma):
         '''
         设置高斯平滑参数(set gaussian parameter)\n
@@ -106,8 +107,7 @@ class Realign:
         M_r = T @ R
         # 坐标系转换矩阵(coordinate system transformation matrix)
         coor = self.v2d()
-        M = np.linalg.inv(coor) @ M_r @ coor
-        return M
+        return np.linalg.inv(coor) @ M_r @ coor
 
     def get_new_img(self, resource, q):
         '''
@@ -121,9 +121,9 @@ class Realign:
         interpolator = self.interpolator
         new_img = np.ndarray(resource.shape)
         # 对应位置的转换
-        for i in range(0, self.shape[1]):
-            for j in range(0, self.shape[2]):
-                for k in range(0, self.shape[3]):
+        for i in range(self.shape[1]):
+            for j in range(self.shape[2]):
+                for k in range(self.shape[3]):
                     M = self.rigid(q)
                     if np.linalg.det(M)==0:
                         interpo_pos = np.linalg.pinv(M)@[i, j, k, 1]
@@ -140,7 +140,7 @@ class Realign:
                         new_img[i, j, k] = resource[i, j, k]
         return new_img
 
-    def iterate(self, resource, reference, q):
+    def iterate(self, resource, reference, q,pic_num):
         '''
         高斯牛顿迭代(gauss-newton iterate)\n
         输入参数(parameter):\n
@@ -159,9 +159,9 @@ class Realign:
         # 偏导矩阵 (derivative matrix)
         b_diff = np.zeros(((self.x*self.y*self.z), 7))
         index = 0
-        for i in range(0, self.x):
-            for j in range(0, self.y):
-                for k in range(0, self.z):
+        for i in range(self.x):
+            for j in range(self.y):
+                for k in range(self.z):
                     n_i = i*step  # # 对应位置的转换,获得点在原图的位置(get the position of the point in the original image)
                     n_j = j*step
                     n_k = k*step
@@ -187,7 +187,7 @@ class Realign:
                         point[0] = n_i
                         point[1] = n_j
                         point[2] = n_k
-                        point[3] = 1
+                        point[3] = pic_num
 
                     derivative = interpolator.EvaluateDerivative(point)
                     diff_x = derivative[0]
@@ -239,14 +239,14 @@ class Realign:
             q=np.zeros(7)
             q[6] = 1
             # 高斯牛顿迭代
-            for i in range(self.iteration):
-                (b, diff_b) = self.iterate(self.img_data[0,:, :, :], self.img_data[picture,:, :, :], q)
+            for _ in range(self.iteration):
+                (b, diff_b) = self.iterate(self.img_data[0,:, :, :], self.img_data[picture,:, :, :], q,picture)
                 q[6]=1
-                if np.linalg.det(diff_b.T@diff_b) == 0:
-                    # 矩阵不可逆时用伪逆
-                    q -= np.linalg.pinv(diff_b.T@diff_b)@diff_b.T@b
-                else:
-                    q -= np.linalg.inv(diff_b.T@diff_b)@diff_b.T@b
+                q -= (
+                    np.linalg.pinv(diff_b.T @ diff_b) @ diff_b.T @ b
+                    if np.linalg.det(diff_b.T @ diff_b) == 0
+                    else np.linalg.inv(diff_b.T @ diff_b) @ diff_b.T @ b
+                )
             if np.any(np.abs(q)>10):
                 q=np.zeros(7)
                 q[6] = 1
@@ -256,13 +256,14 @@ class Realign:
         self.draw_parameter()
         return self.parameter
 
-    def save_img(img, name):
+    def save_img(self,img, name):
         '''
         保存图片\n
         Save image\n
         input: 图片数据(Image data), 图片名(Image name)
         '''
-        img = nib.Nifti1Image(img)
+        img = np.transpose(img,(3,2,1,0))#将图片转换为nii格式就要按nii的顺序排列
+        img = nib.Nifti1Image(img,self.affine)
         nib.save(img, name)
         print(f"图片{name}保存成功")
         
@@ -293,10 +294,13 @@ class Realign:
 ## 测验代码
 realign = Realign('sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii.gz')
 # 展示参数设置方法
+realign.set_gussian(2)
 realign.set_order(3)
-realign.set_iteration(3)
+realign.set_iteration(1)
 realign.set_step(4)
 # 获得刚体变换参数
 realign.estimate()
 # 获得重采样后的图像
 realign.reslicing()
+
+realign.save_img(realign.img_data, "original2.nii")
