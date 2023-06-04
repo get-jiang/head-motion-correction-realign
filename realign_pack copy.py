@@ -20,17 +20,14 @@ class Realign:
         spacing_array = np.array(spacing)  
         spacing_array = spacing_array[::-1]  # 倒序(reverse order)itk[读取的数据与nibabel读取的数据的坐标轴顺序不同]
         self.affine = np.diag(spacing_array)  # 仿射矩阵(affine matrix)
-        print(self.affine)
         # 默认参数设置(default parameter setting)
         self.iteration = 100  # 迭代次数(iteration times)
-        self.interpolator = itk.BSplineInterpolateImageFunction.New(
-            self.img)  # B样条插值器(B-spline interpolation)
+        self.interpolator = itk.BSplineInterpolateImageFunction.New(self.img)  # B样条插值器(B-spline interpolation)
         self.interpolator.SetSplineOrder(3)# 设置B样条插值阶数(set B-spline interpolation order)
         self.step = 4  # 选点间隔(point interval)
         self.x, self.y, self.z =  self.shape[1]//self.step, self.shape[2]//self.step,self.shape[3]//self.step
         # 初始旋转平移参数(rotation and translation parameters)
         self.parameter = np.zeros((self.shape[0],7))
-        print(self.img_data.shape)
         print("图片载入成功,请耐心等待:) \nimage loaded successfully,please wait patiently")
     
     def set_gussian(self, sigma):
@@ -139,7 +136,7 @@ class Realign:
                     new_img[i, j, k] = interpolator.Evaluate(point)
         return new_img
 
-    def iterate(self, resource, reference, q,pic_num):
+    def iterate(self, reference, q,pic_num):
         '''
         高斯牛顿迭代(gauss-newton iterate)\n
         输入参数(parameter):\n
@@ -181,9 +178,7 @@ class Realign:
                     diff_x = derivative[1]
                     diff_y = derivative[2]
                     diff_z = derivative[3]
-                    a=self.shape[1]
-                    b=self.shape[2]
-                    c=self.shape[3]
+                    (a,b,c)=self.shape[1:]
                     b_diff[index][1:4] = diff_x*tem, diff_y*tem, diff_z*tem
                     b_diff[index][4] = (diff_y*(-0.5*self.affine[0][0]*a*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[1][1] + self.affine[0][0]*(sin(q[4])*sin(q[6]) - sin(q[5])*cos(q[4])*cos(q[6]))/self.affine[1][1] - 0.5*b*(-sin(q[4])*cos(q[6]) - sin(q[5])*sin(q[6])*cos(q[4])) - sin(q[4])*cos(q[6]) - sin(q[5])*sin(q[6])*cos(q[4]) - 0.5*self.affine[2][2]*c*cos(q[4])*cos(q[5])/self.affine[1][1] + self.affine[2][2]*cos(q[4])*cos(q[5])/self.affine[1][1]) + \
                         diff_z*(-0.5*self.affine[0][0]*a*(sin(q[4])*sin(q[5])*cos(q[6]) + sin(q[6])*cos(q[4]))/self.affine[2][2] + self.affine[0][0]*(sin(q[4])*sin(q[5])*cos(q[6]) + sin(q[6])*cos(q[4]))/self.affine[2][2] - 0.5*self.affine[1][1]*b*(
@@ -203,7 +198,7 @@ class Realign:
                     index += 1
         return bi, b_diff
 
-    def reslicing(self):
+    def reslicing(self,name):
         '''
         用刚体变换参数将图片进行重采样对齐\n
         Resampling and aligning the image with the rigid-body transform parameter\n
@@ -214,7 +209,7 @@ class Realign:
         for picture in range(self.shape[0]):
             new[picture:, :, :] = self.get_new_img(self.img_data[picture,:, :, :], self.parameter[picture],picture)
             print(f"进度{picture*100/self.shape[0]}%", end="\r")
-        self.save_img(new, "resliced.nii")
+        self.save_img(new, name)
         return new
 
     def estimate(self):
@@ -231,7 +226,7 @@ class Realign:
             for _ in range(self.iteration):
                 
                 q[0]=1
-                (b, diff_b) = self.iterate(self.img_data[0,:, :, :], self.img_data[picture,:, :, :], q,picture)
+                (b, diff_b) = self.iterate(self.img_data[0,:, :, :], q,picture)
                 
                 if np.linalg.det(diff_b.T@diff_b) == 0:
                     # 矩阵不可逆时用伪逆
@@ -243,7 +238,7 @@ class Realign:
             q[q<-40]=0
             self.parameter[picture] = q
             print(f"进度{picture*100/self.shape[0]}%", end="\r")
-            print(f'第{picture}张图片刚体变换参数估计完成,参数为{q}\n')
+            # print(f'第{picture}张图片刚体变换参数估计完成,参数为{q}\n')
         print("刚体变换参数估计完成,若需要进行reslicing，请先关闭图像\nestimation complete")
         self.draw_parameter()
         return self.parameter
@@ -254,7 +249,8 @@ class Realign:
         Save image\n
         input: 图片数据(Image data), 图片名(Image name)
         '''
-        img = nib.Nifti1Image(img)
+        img = np.transpose(img,(3,2,1,0))#将图片转换为nii格式就要按nii的顺序排列
+        img = nib.Nifti1Image(img,self.affine)
         nib.save(img, name)
         print(f"图片{name}保存成功")
         
@@ -292,4 +288,4 @@ if __name__ == "__main__":
     # 获得刚体变换参数并绘制头动曲线
     realign.estimate()
     # 获得重采样后的图像
-    realign.reslicing()
+    realign.reslicing("picture.nii")
