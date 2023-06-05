@@ -5,7 +5,7 @@ import nibabel as nib
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 class Realign:
-    def __init__(self, path):
+    def __init__(self, path, sigma=1.0, iteration=1, order=1, step=4):
         '''初始化(initialization)\n
             输入参数(parameter):\n
             path:文件路径(file path)
@@ -20,11 +20,13 @@ class Realign:
         spacing_array = np.array(spacing)  
         spacing_array = spacing_array[::-1]  # 倒序(reverse order)itk[读取的数据与nibabel读取的数据的坐标轴顺序不同]
         self.affine = np.diag(spacing_array)  # 仿射矩阵(affine matrix)
-        # 默认参数设置(default parameter setting)
-        self.iteration = 100  # 迭代次数(iteration times)
+        # 默认参数设置及预处理(default parameter setting and preprocessing)
+        self.iteration = iteration  # 迭代次数(iteration times)
+        # self.img_data = gaussian_filter(self.img_data, sigma)# 高斯平滑(gaussian smooth)
+        # self.img=itk.image_from_array(self.img_data)
         self.interpolator = itk.BSplineInterpolateImageFunction.New(self.img)  # B样条插值器(B-spline interpolation)
-        self.interpolator.SetSplineOrder(3)# 设置B样条插值阶数(set B-spline interpolation order)
-        self.step = 4  # 选点间隔(point interval)
+        self.interpolator.SetSplineOrder(order)# 设置B样条插值阶数(set B-spline interpolation order)
+        self.step = step  # 选点间隔(point interval)
         self.x, self.y, self.z =  self.shape[1]//self.step, self.shape[2]//self.step,self.shape[3]//self.step
         # 初始旋转平移参数(rotation and translation parameters)
         self.parameter = np.zeros((self.shape[0],7))
@@ -116,9 +118,8 @@ class Realign:
         q:旋转平移参数(rotation and translation parameters)\n
         输出(output):\n
         new_img:新图像(new image)'''
-        # B样条插值/B-spline interpolation
-        interpolator = self.interpolator
         new_img = np.ndarray(resource.shape)
+        
         # 对应位置的转换
         for i in range(self.shape[1]):
             for j in range(self.shape[2]):
@@ -127,13 +128,11 @@ class Realign:
                     if np.linalg.det(M)==0:
                         interpo_pos = np.linalg.pinv(M)@[i, j, k, 1]
                     else:
-                        interpo_pos = np.linalg.inv(M)@[i, j, k, 1]
-                    point = itk.Point[itk.D, 4]()
-                    point[0] = pic_num
-                    point[1] = interpo_pos[0]
-                    point[2] = interpo_pos[1]
-                    point[3] = interpo_pos[2]
-                    new_img[i, j, k] = interpolator.Evaluate(point)
+                        interpo_pos =np.linalg.inv(M)@[i, j, k, 1]
+                    if 0 <= interpo_pos[0] < self.shape[1] and 0 <= interpo_pos[1] < self.shape[2] and 0 <= interpo_pos[2] < self.shape[3]:  # 判断是否在范围内
+                        new_img[i, j, k] = resource[int(interpo_pos[0]), int(interpo_pos[1]), int(interpo_pos[2])]
+                    else:
+                        new_img[i, j, k] = resource[i, j, k]
         return new_img
 
     def iterate(self, reference, q,pic_num):
@@ -167,10 +166,16 @@ class Realign:
                         interpo_pos = np.linalg.pinv(M)@[n_i, n_j, n_k, 1]
                     else:
                         interpo_pos =np.linalg.inv(M)@[n_i, n_j, n_k, 1]
-                    point = itk.Point[itk.D, 4]()
-                    point[1] = interpo_pos[0]
-                    point[2] = interpo_pos[1]
-                    point[3] = interpo_pos[2]
+                    point = itk.Point[itk.D, 4]() 
+                    if 0 <= interpo_pos[0] < self.shape[1] and 0 <= interpo_pos[1] < self.shape[2] and 0 <= interpo_pos[2] < self.shape[3]:  # 判断是否在范围内
+                        point[1] = interpo_pos[0]
+                        point[2] = interpo_pos[1]
+                        point[3] = interpo_pos[2]
+                    else:
+                        point[1] = n_i
+                        point[2] = n_j
+                        point[3] = n_k
+                        
                     point[0] = pic_num
                     bi[index] = (interpolator.Evaluate(point)-reference[n_i][n_j][n_k])**2
                     tem=interpolator.Evaluate(point)-reference[n_i][n_j][n_k]
@@ -207,7 +212,7 @@ class Realign:
         print("开始重采样对齐(注意，需要很长时间，建议先去干点别的事)\nreslicing")
         new = np.ndarray(self.shape)
         for picture in range(self.shape[0]):
-            new[picture:, :, :] = self.get_new_img(self.img_data[picture,:, :, :], self.parameter[picture],picture)
+            new[picture,:, :, :] = self.get_new_img(self.img_data[picture,:, :, :], self.parameter[picture],picture)
             print(f"进度{picture*100/self.shape[0]}%", end="\r")
         self.save_img(new, name)
         return new
@@ -236,9 +241,8 @@ class Realign:
             q[0] = 1
             q[q>40]=0
             q[q<-40]=0
-            self.parameter[picture] = q
+            self.parameter[picture] = q/10
             print(f"进度{picture*100/self.shape[0]}%", end="\r")
-            # print(f'第{picture}张图片刚体变换参数估计完成,参数为{q}\n')
         print("刚体变换参数估计完成,若需要进行reslicing，请先关闭图像\nestimation complete")
         self.draw_parameter()
         return self.parameter
@@ -251,6 +255,7 @@ class Realign:
         '''
         img = np.transpose(img,(3,2,1,0))#将图片转换为nii格式就要按nii的顺序排列
         img = nib.Nifti1Image(img,self.affine)
+        name = f"{name}.nii.gz"
         nib.save(img, name)
         print(f"图片{name}保存成功")
         
@@ -280,12 +285,7 @@ class Realign:
 if __name__ == "__main__":
     ## 测验代码
     realign = Realign('sub-Ey153_ses-3_task-rest_acq-EPI_run-1_bold.nii.gz')
-    # 参数设置
-    realign.set_order(2)
-    realign.set_gussian(2)
-    realign.set_iteration(1)
-    realign.set_step(4)
     # 获得刚体变换参数并绘制头动曲线
     realign.estimate()
     # 获得重采样后的图像
-    realign.reslicing("picture.nii")
+    realign.reslicing("picture")
